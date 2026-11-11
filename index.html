@@ -238,10 +238,13 @@ function shell(inner){
   nav.innerHTML=tabs.map(([key,t])=>`<button data-tab="${key}"${key===view?' aria-current="page"':''}>${ICON[t.icon]}<span>${t.label}</span></button>`).join('');
   nav.onclick=e=>{const b=e.target.closest('button');if(b){view=b.dataset.tab;if(view!=='hist')histLen=null;render();window.scrollTo(0,0)}};
   app.innerHTML=`<header class="top"><div class="who"><b>${esc(me.nom)}</b> · ${ROLE[me.role]}</div>
-    <button class="btn ghost" id="out">Se déconnecter</button></header>`;
+    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+    <button class="btn ghost" id="acc"${view==='compte'?' style="background:var(--green-soft);color:var(--green-strong);border-color:transparent"':''}>Mon compte</button>
+    <button class="btn ghost" id="out">Se déconnecter</button></div></header>`;
   if(matchMedia('(min-width:760px)').matches)app.appendChild(nav);else document.body.appendChild(nav);
   app.insertAdjacentHTML('beforeend',inner);
   $('#out').onclick=async()=>{await sb.auth.signOut();renderLogin()};
+  $('#acc').onclick=()=>{view='compte';render();window.scrollTo(0,0)};
 }
 
 /* ===== Inventaire ===== */
@@ -360,7 +363,7 @@ function vAdmin(){
       <div class="field"><label for="ar">Rôle</label><select id="ar"><option value="reparateur">Réparateur</option><option value="cariste">Cariste</option><option value="admin">Administrateur</option></select></div>
       <div class="err" id="aerr"></div>
       <button class="btn" id="ago" type="submit">Créer le compte</button>
-      <p class="note" style="margin:0">Donne ensuite à l'employé son adresse mail et ce mot de passe pour qu'il se connecte.</p>
+      <p class="note" style="margin:0">Donne ensuite à l'employé son adresse mail et ce mot de passe pour qu'il se connecte. Il pourra ensuite le changer dans « Mon compte ».</p>
     </form>
   </section>
   <section class="card">
@@ -395,13 +398,45 @@ function bindAdmin(){
   });
 }
 
+/* ===== Mon compte : changer son mot de passe ===== */
+function vCompte(){
+  return `<section class="card stack">
+    <h2>Mon compte</h2>
+    <div class="muted">${esc(me.nom)} · ${ROLE[me.role]}</div>
+    <h3>Changer mon mot de passe</h3>
+    <form id="pf" class="stack" novalidate>
+      <div class="field"><label for="p1">Nouveau mot de passe (8 caractères minimum)</label><input id="p1" type="password" autocomplete="new-password"></div>
+      <div class="field"><label for="p2">Retape le nouveau mot de passe</label><input id="p2" type="password" autocomplete="new-password"></div>
+      <label style="display:flex;gap:8px;align-items:center;margin:0;font-size:15px"><input id="pshow" type="checkbox" style="width:auto"> Afficher les mots de passe</label>
+      <div class="err" id="perr"></div>
+      <button class="btn" id="pgo" type="submit">Enregistrer le nouveau mot de passe</button>
+    </form>
+  </section>`;
+}
+function bindCompte(){
+  $('#pshow').onchange=e=>{['#p1','#p2'].forEach(s=>$(s).type=e.target.checked?'text':'password')};
+  $('#pf').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const a=$('#p1').value,b=$('#p2').value,err=$('#perr');
+    if(a.length<8)return err.textContent='Le mot de passe doit faire au moins 8 caractères.';
+    if(a!==b)return err.textContent='Les deux mots de passe ne sont pas identiques.';
+    const btn=$('#pgo');btn.disabled=true;btn.textContent='Enregistrement…';err.textContent='';
+    const {error}=await sb.auth.updateUser({password:a});
+    if(error){
+      err.textContent=/different|same/i.test(error.message)?"C'est déjà ton mot de passe actuel. Choisis-en un autre.":errMsg(error);
+      btn.disabled=false;btn.textContent='Enregistrer le nouveau mot de passe';return}
+    toast('Mot de passe changé. Utilise-le à ta prochaine connexion.');
+    view='inv';render();
+  });
+}
+
 function render(){
   if(!me)return renderLogin();
-  if(!TABS[view].roles.includes(me.role))view='inv';
-  const V={inv:vInv,rep:vRep,exp:vExp,hist:vHist,admin:vAdmin};
+  if(view!=='compte'&&!TABS[view].roles.includes(me.role))view='inv';
+  const V={inv:vInv,rep:vRep,exp:vExp,hist:vHist,admin:vAdmin,compte:vCompte};
   shell(V[view]());
   if(view==='inv')document.querySelectorAll('.row').forEach(r=>r.onclick=()=>{histLen=r.dataset.len;histFilter='all';view='hist';render();window.scrollTo(0,0)});
-  if(view==='rep')bindRep();if(view==='exp')bindExp();if(view==='hist')bindHist();if(view==='admin')bindAdmin();
+  if(view==='rep')bindRep();if(view==='exp')bindExp();if(view==='hist')bindHist();if(view==='admin')bindAdmin();if(view==='compte')bindCompte();
 }
 matchMedia('(min-width:760px)').addEventListener?.('change',()=>{document.querySelector('.tabs')?.remove();if(me)render()});
 start().catch(e=>renderLogin(errMsg(e)));
