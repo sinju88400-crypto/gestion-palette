@@ -145,10 +145,11 @@ const ICON={
  chev:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg>',
  logo:'<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linejoin="round"><path d="M22 4 6 12v20l16 9"/><path d="M6 12l16 8 16-8-16-8M22 20v8"/><path d="M38 12v10"/><path d="m28 36 5 5 9-10"/></svg>'
 };
+const VERSION='Version 3 · réparations ouvertes au cariste';
 const ROLE={admin:'Administrateur',cariste:'Cariste',reparateur:'Réparateur'};
 const TABS={
   inv:{label:'Inventaire',icon:'box',roles:['admin','cariste','reparateur']},
-  rep:{label:'Réparation',icon:'wrench',roles:['admin','reparateur']},
+  rep:{label:'Réparation',icon:'wrench',roles:['admin','reparateur','cariste']},
   exp:{label:'Expédition',icon:'truck',roles:['admin','cariste']},
   hist:{label:'Historique',icon:'list',roles:['admin','cariste','reparateur']},
   admin:{label:'Admin',icon:'shield',roles:['admin']}
@@ -219,7 +220,7 @@ function renderLogin(err){
       <div class="field"><label for="lpw">Mot de passe</label><input id="lpw" type="password" autocomplete="current-password" placeholder="••••••••"></div>
       <div class="err" id="lerr">${err?esc(err):''}</div>
       <button class="btn" type="submit" id="lgo">Se connecter</button>
-      <div class="muted" style="text-align:center;font-size:14px">Accès réservé aux employés autorisés</div>
+      <div class="muted" style="text-align:center;font-size:14px">Accès réservé aux employés autorisés<br><span style="font-size:12px">${VERSION}</span></div>
     </form></div>`;
   $('#lf').addEventListener('submit',async e=>{
     e.preventDefault();
@@ -403,6 +404,7 @@ function vCompte(){
   return `<section class="card stack">
     <h2>Mon compte</h2>
     <div class="muted">${esc(me.nom)} · ${ROLE[me.role]}</div>
+    <div class="note">${VERSION}</div>
     <h3>Changer mon mot de passe</h3>
     <form id="pf" class="stack" novalidate>
       <div class="field"><label for="p1">Nouveau mot de passe (8 caractères minimum)</label><input id="p1" type="password" autocomplete="new-password"></div>
