@@ -145,10 +145,10 @@ const ICON={
  chev:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg>',
  logo:'<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linejoin="round"><path d="M22 4 6 12v20l16 9"/><path d="M6 12l16 8 16-8-16-8M22 20v8"/><path d="M38 12v10"/><path d="m28 36 5 5 9-10"/></svg>'
 };
-const VERSION='Version 3 · réparations ouvertes au cariste';
-const ROLE={admin:'Administrateur',cariste:'Cariste',reparateur:'Réparateur'};
+const VERSION='Version 6 · accès visiteur et réseau instable';
+const ROLE={admin:'Administrateur',cariste:'Cariste',reparateur:'Réparateur',visiteur:'Visiteur'};
 const TABS={
-  inv:{label:'Inventaire',icon:'box',roles:['admin','cariste','reparateur']},
+  inv:{label:'Inventaire',icon:'box',roles:['admin','cariste','reparateur','visiteur']},
   rep:{label:'Réparation',icon:'wrench',roles:['admin','reparateur','cariste']},
   exp:{label:'Expédition',icon:'truck',roles:['admin','cariste']},
   hist:{label:'Historique',icon:'list',roles:['admin','cariste','reparateur']},
@@ -184,6 +184,11 @@ function when(iso){
 
 /* ===== Données ===== */
 async function refresh(){
+  if(me&&me.guest){
+    const s=await sb.from('stock').select('*').order('longueur');
+    if(s.error)throw s.error;
+    stock=s.data;moves=[];profils=[];return;
+  }
   const [s,m,p]=await Promise.all([
     sb.from('stock').select('*').order('longueur'),
     sb.from('mouvements').select('*').order('cree_le',{ascending:false}).limit(300),
@@ -192,11 +197,48 @@ async function refresh(){
   const e=s.error||m.error||p.error; if(e)throw e;
   stock=s.data;moves=m.data;profils=p.data;
 }
+const TOKEN_KEY='sb-wflzjtyscvybocfinfeu-auth-token';
+const isNetErr=e=>!navigator.onLine||!e||/fetch|network|load failed|timeout|connexion/i.test(e.message||String(e));
+function hasStoredSession(){try{return !!localStorage.getItem(TOKEN_KEY)}catch(e){return false}}
+function guestMode(on){try{on?localStorage.setItem('mode-visiteur','1'):localStorage.removeItem('mode-visiteur')}catch(e){}}
+function isGuestSaved(){try{return localStorage.getItem('mode-visiteur')==='1'}catch(e){return false}}
+
+let offlineTimer=null;
+function renderOffline(){
+  me=null;document.querySelector('.tabs')?.remove();
+  app.innerHTML=`<div class="card login stack" style="text-align:center">
+    <div>${ICON.logo.replace('<svg','<svg class="logo"')}<h2>Pas de réseau</h2></div>
+    <p class="muted" style="margin:0">Tu restes connecté. L'appli se reconnecte toute seule dès que le réseau revient, pas besoin de retaper ton mot de passe.</p>
+    <button class="btn" id="retry">Réessayer maintenant</button></div>`;
+  $('#retry').onclick=()=>{$('#retry').textContent='Connexion…';start()};
+  clearTimeout(offlineTimer);offlineTimer=setTimeout(start,10000);
+}
+window.addEventListener('online',()=>{if(!me)start();else autoRefresh()});
+
+async function startGuest(){
+  guestMode(true);
+  me={id:null,nom:'Visiteur',role:'visiteur',guest:true};view='inv';
+  try{await refresh()}catch(e){if(isNetErr(e))return renderOffline();toast(errMsg(e),true)}
+  render();
+}
+
 async function start(){
-  const {data:{session}}=await sb.auth.getSession();
-  if(!session)return renderLogin();
-  const {data,error}=await sb.from('profils').select('*').eq('id',session.user.id).maybeSingle();
-  if(error){await sb.auth.signOut();return renderLogin(errMsg(error))}
+  clearTimeout(offlineTimer);
+  if(isGuestSaved())return startGuest();
+  let session=null;
+  try{({data:{session}}=await sb.auth.getSession())}catch(e){}
+  if(!session){
+    // Session gardée mais réseau absent : on n'oblige pas à se reconnecter
+    if(hasStoredSession()&&!navigator.onLine)return renderOffline();
+    return renderLogin();
+  }
+  let res;
+  try{res=await sb.from('profils').select('*').eq('id',session.user.id).maybeSingle()}catch(e){res={error:e}}
+  const {data,error}=res;
+  if(error){
+    if(isNetErr(error))return renderOffline();
+    await sb.auth.signOut();return renderLogin(errMsg(error));
+  }
   if(!data){await sb.auth.signOut();return renderLogin("Ce compte n'a pas encore de profil. Demandez à l'administrateur de l'ajouter.")}
   if(!data.actif){await sb.auth.signOut();return renderLogin("Ce compte est désactivé. Demandez à l'administrateur de le réactiver.")}
   me=data;
@@ -205,8 +247,14 @@ async function start(){
   render();
 }
 /* Mise à jour automatique : toutes les 30 s et au retour sur l'appli */
-setInterval(()=>{if(me&&!busy&&document.visibilityState==='visible')refresh().then(()=>{if(['inv','hist','admin'].includes(view))render()}).catch(()=>{})},30000);
-document.addEventListener('visibilitychange',()=>{if(me&&document.visibilityState==='visible')refresh().then(render).catch(()=>{})});
+/* On ne redessine que les pages de consultation, et jamais pendant une saisie */
+function autoRefresh(){
+  if(!me||busy||document.visibilityState!=='visible')return;
+  const typing=document.activeElement&&['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName);
+  refresh().then(()=>{if(['inv','hist'].includes(view)&&!typing)render()}).catch(()=>{});
+}
+setInterval(autoRefresh,30000);
+document.addEventListener('visibilitychange',autoRefresh);
 
 /* ===== Connexion ===== */
 function renderLogin(err){
@@ -220,8 +268,13 @@ function renderLogin(err){
       <div class="field"><label for="lpw">Mot de passe</label><input id="lpw" type="password" autocomplete="current-password" placeholder="••••••••"></div>
       <div class="err" id="lerr">${err?esc(err):''}</div>
       <button class="btn" type="submit" id="lgo">Se connecter</button>
-      <div class="muted" style="text-align:center;font-size:14px">Accès réservé aux employés autorisés<br><span style="font-size:12px">${VERSION}</span></div>
-    </form></div>`;
+    </form>
+    <div class="stack" style="gap:8px;border-top:1px solid var(--line);padding-top:16px">
+      <button class="btn ghost" id="lvis" type="button" style="width:100%;font-size:17px;padding:14px">Entrer en visiteur</button>
+      <div class="muted" style="text-align:center;font-size:14px">Le visiteur voit seulement le stock, sans mot de passe.</div>
+    </div>
+    <div class="muted" style="text-align:center;font-size:12px">${VERSION}</div></div>`;
+  $('#lvis').onclick=startGuest;
   $('#lf').addEventListener('submit',async e=>{
     e.preventDefault();
     const b=$('#lgo');b.disabled=true;b.textContent='Connexion…';
@@ -240,25 +293,25 @@ function shell(inner){
   nav.onclick=e=>{const b=e.target.closest('button');if(b){view=b.dataset.tab;if(view!=='hist')histLen=null;render();window.scrollTo(0,0)}};
   app.innerHTML=`<header class="top"><div class="who"><b>${esc(me.nom)}</b> · ${ROLE[me.role]}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-    <button class="btn ghost" id="acc"${view==='compte'?' style="background:var(--green-soft);color:var(--green-strong);border-color:transparent"':''}>Mon compte</button>
-    <button class="btn ghost" id="out">Se déconnecter</button></div></header>`;
+    ${me.guest?'':`<button class="btn ghost" id="acc"${view==='compte'?' style="background:var(--green-soft);color:var(--green-strong);border-color:transparent"':''}>Mon compte</button>`}
+    <button class="btn ghost" id="out">${me.guest?'Quitter':'Se déconnecter'}</button></div></header>`;
   if(matchMedia('(min-width:760px)').matches)app.appendChild(nav);else document.body.appendChild(nav);
   app.insertAdjacentHTML('beforeend',inner);
-  $('#out').onclick=async()=>{await sb.auth.signOut();renderLogin()};
-  $('#acc').onclick=()=>{view='compte';render();window.scrollTo(0,0)};
+  $('#out').onclick=async()=>{if(me.guest)guestMode(false);else await sb.auth.signOut();renderLogin()};
+  if($('#acc'))$('#acc').onclick=()=>{view='compte';render();window.scrollTo(0,0)};
 }
 
 /* ===== Inventaire ===== */
 function vInv(){
   const last=moves[0];
   return `<section class="card stack">
-    <div class="top"><h2>Mon inventaire</h2><span class="pill">Connecté</span></div>
+    <div class="top"><h2>${me.guest?'Stock disponible':'Mon inventaire'}</h2><span class="pill${me.guest?' blue':''}">${me.guest?'Lecture seule':'Connecté'}</span></div>
     <div class="total"><span class="eyebrow">Total des palettes réparées</span><span class="big num">${total()}</span>
       ${last?`<span class="muted" style="font-size:14px">Dernière modification : ${when(last.cree_le).replace(' – ',' à ')}, par ${esc(nameOf(last.utilisateur))}</span>`:''}</div>
     <h3>Largeur : 1 mètre</h3>
     <div class="rows">${stock.map(s=>`<button class="row${s.quantite?'':' zero'}" data-len="${k(s.longueur)}">
       <span><span class="len">${fmtLen(s.longueur)}</span><br><span class="sub">Palettes réparées</span></span>
-      <span class="qty num">${s.quantite}</span>${ICON.chev}</button>`).join('')}</div>
+      <span class="qty num">${s.quantite}</span>${me.guest?'<span></span>':ICON.chev}</button>`).join('')}</div>
   </section>`;
 }
 
@@ -437,7 +490,7 @@ function render(){
   if(view!=='compte'&&!TABS[view].roles.includes(me.role))view='inv';
   const V={inv:vInv,rep:vRep,exp:vExp,hist:vHist,admin:vAdmin,compte:vCompte};
   shell(V[view]());
-  if(view==='inv')document.querySelectorAll('.row').forEach(r=>r.onclick=()=>{histLen=r.dataset.len;histFilter='all';view='hist';render();window.scrollTo(0,0)});
+  if(view==='inv'&&!me.guest)document.querySelectorAll('.row').forEach(r=>r.onclick=()=>{histLen=r.dataset.len;histFilter='all';view='hist';render();window.scrollTo(0,0)});
   if(view==='rep')bindRep();if(view==='exp')bindExp();if(view==='hist')bindHist();if(view==='admin')bindAdmin();if(view==='compte')bindCompte();
 }
 matchMedia('(min-width:760px)').addEventListener?.('change',()=>{document.querySelector('.tabs')?.remove();if(me)render()});
