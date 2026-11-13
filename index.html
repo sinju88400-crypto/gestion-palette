@@ -145,7 +145,7 @@ const ICON={
  chev:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg>',
  logo:'<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linejoin="round"><path d="M22 4 6 12v20l16 9"/><path d="M6 12l16 8 16-8-16-8M22 20v8"/><path d="M38 12v10"/><path d="m28 36 5 5 9-10"/></svg>'
 };
-const VERSION='Version 6 · accès visiteur et réseau instable';
+const VERSION='Version 7 · correction du stock';
 const ROLE={admin:'Administrateur',cariste:'Cariste',reparateur:'Réparateur',visiteur:'Visiteur'};
 const TABS={
   inv:{label:'Inventaire',icon:'box',roles:['admin','cariste','reparateur','visiteur']},
@@ -330,27 +330,47 @@ async function addMove(type,f,client){
   busy=false;return true;
 }
 
-/* ===== Réparation ===== */
+/* ===== Réparation (ajout) et correction (retrait) ===== */
 function vRep(){
-  const f=form.rep,cur=qty(f.len);
+  const f=form.rep; if(!f.mode)f.mode='add'; if(f.motif==null)f.motif='';
+  const fix=f.mode==='fix';
+  const seg=(m,l)=>`<button type="button" data-mode="${m}" aria-pressed="${f.mode===m}" style="flex:1;font-size:16px;padding:10px">${l}</button>`;
   return `<section class="card stack">
-    <div class="top" style="justify-content:flex-start">${ICON.wrench.replace('<svg','<svg width="32" height="32" style="color:var(--green)"')}<h2>Nouvelle réparation</h2></div>
+    <div class="top" style="justify-content:flex-start">${ICON.wrench.replace('<svg','<svg width="32" height="32" style="color:var(--green)"')}<h2>${fix?'Corriger le stock':'Nouvelle réparation'}</h2></div>
+    <div class="filters" id="rmode" style="flex-wrap:nowrap">${seg('add','+ Ajouter des réparées')}${seg('fix','− Corriger une erreur')}</div>
+    ${fix?'<p class="note" style="margin:0">Retire des palettes enregistrées par erreur. La correction reste visible dans l\'historique.</p>':''}
     <div class="field"><label for="rw">Largeur</label><select id="rw"><option>1 mètre</option></select></div>
-    <div class="field"><label for="rl">Longueur</label><select id="rl">${lenOpts(f.len)}</select></div>
-    <div class="field"><label for="rq" style="margin-bottom:0">Quantité réparée</label>
+    <div class="field"><label for="rl">Longueur</label><select id="rl">${lenOpts(f.len,fix)}</select></div>
+    <div class="field"><label for="rq" style="margin-bottom:0">${fix?'Quantité à retirer':'Quantité réparée'}</label>
       <div class="qtybox"><input id="rq" class="num" type="number" inputmode="numeric" min="0" value="${f.q}">${stepsHtml}</div></div>
-    <button class="btn" id="rgo"${f.q>0?'':' disabled'}>Valider la réparation</button>
-    <div class="preview num" id="rprev">Stock ${fmtLen(f.len)} : ${cur} + ${f.q} = ${cur+f.q} palettes</div>
+    ${fix?`<div class="field"><label for="rm">Motif de la correction (facultatif)</label><input id="rm" placeholder="ex. Erreur de saisie, mauvaise longueur" value="${esc(f.motif)}"></div>`:''}
+    <button class="btn${fix?' blue':''}" id="rgo" disabled>${fix?'Valider la correction':'Valider la réparation'}</button>
+    <div class="preview num" id="rprev"></div>
   </section>`;
 }
 function bindRep(){
-  const f=form.rep,upd=()=>{const cur=qty(f.len);$('#rprev').textContent=`Stock ${fmtLen(f.len)} : ${cur} + ${f.q} = ${cur+f.q} palettes`;$('#rgo').disabled=!(f.q>0)};
+  const f=form.rep,fix=f.mode==='fix';
+  const upd=()=>{
+    const cur=qty(f.len),after=fix?cur-f.q:cur+f.q,p=$('#rprev');
+    p.style.color=after<0?'var(--danger)':'';
+    p.textContent=after<0
+      ?`Impossible : il n'y a que ${cur} palettes en ${fmtLen(f.len)}.`
+      :`Stock ${fmtLen(f.len)} : ${cur} ${fix?'−':'+'} ${f.q} = ${after} palettes`;
+    $('#rgo').disabled=!(f.q>0&&after>=0);
+  };
+  document.querySelectorAll('#rmode button').forEach(b=>b.onclick=()=>{f.mode=b.dataset.mode;f.q=0;render()});
   $('#rl').onchange=e=>{f.len=e.target.value;upd()};
+  if($('#rm'))$('#rm').oninput=e=>{f.motif=e.target.value};
   bindQty(f,'#rq',upd);
   $('#rgo').onclick=async()=>{
     const b=$('#rgo');b.disabled=true;b.textContent='Enregistrement…';const q=f.q;
-    if(await addMove('reparation',f)){toast(`+${q} palettes ${fmtLen(f.len)} ajoutées au stock`);f.q=0;render()}
+    if(fix){
+      if(await addMove('correction',f,f.motif.trim())){toast(`Correction : −${q} palettes ${fmtLen(f.len)}`);f.q=0;f.motif='';f.mode='add';render()}
+    }else{
+      if(await addMove('reparation',f)){toast(`+${q} palettes ${fmtLen(f.len)} ajoutées au stock`);f.q=0;render()}
+    }
   };
+  upd();
 }
 
 /* ===== Expédition ===== */
@@ -391,13 +411,13 @@ function vHist(){
   const fb=(key,l)=>`<button data-f="${key}" aria-pressed="${histFilter===key}">${l}</button>`;
   return `<section class="card stack">
     <h2>Historique des mouvements</h2>
-    <div class="filters">${fb('all','Tout')}${fb('reparation','Réparations')}${fb('expedition','Expéditions')}
+    <div class="filters">${fb('all','Tout')}${fb('reparation','Réparations')}${fb('expedition','Expéditions')}${fb('correction','Corrections')}
       ${histLen?`<button data-clear aria-pressed="true">${fmtLen(histLen)} ✕</button>`:''}</div>
     <div class="hist">${list.length?list.map(m=>`<article class="mv">
       <span class="when">${when(m.cree_le)}</span>
-      <span class="pill${m.type==='expedition'?' blue':''}">${m.type==='expedition'?'Expédition':'Réparation'}</span>
-      <span class="q num">${m.type==='expedition'?'−':'+'}${m.quantite} palettes</span>
-      <span class="meta">Dimension : 1 × ${fmtLen(m.longueur)}<br>Utilisateur : ${esc(nameOf(m.utilisateur))}${m.client?`<br>Client : ${esc(m.client)}`:''}</span>
+      <span class="pill${m.type==='expedition'?' blue':m.type==='correction'?' off':''}">${m.type==='expedition'?'Expédition':m.type==='correction'?'Correction':'Réparation'}</span>
+      <span class="q num">${m.type==='reparation'?'+':'−'}${m.quantite} palettes</span>
+      <span class="meta">Dimension : 1 × ${fmtLen(m.longueur)}<br>Utilisateur : ${esc(nameOf(m.utilisateur))}${m.client?`<br>${m.type==='correction'?'Motif':'Client'} : ${esc(m.client)}`:''}</span>
     </article>`).join(''):'<p class="muted">Aucun mouvement pour le moment. Les réparations et expéditions apparaîtront ici.</p>'}</div>
   </section>`;
 }
