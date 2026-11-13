@@ -94,6 +94,9 @@ input:focus,select:focus,button:focus-visible{outline:3px solid color-mix(in srg
 .steps{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
 .steps button{font:inherit;font-size:18px;font-weight:500;border:0;border-radius:999px;padding:6px 16px;cursor:pointer;background:var(--line);color:var(--fg)}
 .steps button.plus{background:var(--green-soft);color:var(--green-strong)}
+.steps button.minus{background:var(--danger-soft);color:var(--danger)}
+.qtybox .neg{display:flex;align-items:center;justify-content:center;gap:2px;font-size:44px;font-weight:700;color:var(--danger)}
+.qtybox .neg input{color:var(--danger)}
 .preview{font-size:15px;color:var(--muted)}
 .result{display:grid;gap:4px;padding:6px 12px 0}
 .result .big{font-size:44px;font-weight:700;color:var(--green-strong);line-height:1.05}
@@ -145,7 +148,7 @@ const ICON={
  chev:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg>',
  logo:'<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linejoin="round"><path d="M22 4 6 12v20l16 9"/><path d="M6 12l16 8 16-8-16-8M22 20v8"/><path d="M38 12v10"/><path d="m28 36 5 5 9-10"/></svg>'
 };
-const VERSION='Version 7 · correction du stock';
+const VERSION='Version 8 · boutons de correction';
 const ROLE={admin:'Administrateur',cariste:'Cariste',reparateur:'Réparateur',visiteur:'Visiteur'};
 const TABS={
   inv:{label:'Inventaire',icon:'box',roles:['admin','cariste','reparateur','visiteur']},
@@ -317,6 +320,7 @@ function vInv(){
 
 /* ===== Saisie commune ===== */
 const lenOpts=(sel,withStock)=>stock.map(s=>`<option value="${k(s.longueur)}"${k(s.longueur)===sel?' selected':''}>${withStock?'1 × ':''}${fmtLen(s.longueur)}${withStock?` (${s.quantite} en stock)`:''}</option>`).join('');
+const stepsFix=`<div class="steps"><button type="button" class="minus" data-d="10">−10</button><button type="button" class="minus" data-d="1">−1</button><button type="button" data-d="-1">+1</button><button type="button" data-d="-10">+10</button></div>`;
 const stepsHtml=`<div class="steps"><button type="button" data-d="-10">-10</button><button type="button" data-d="-1">-1</button><button type="button" class="plus" data-d="1">+1</button><button type="button" class="plus" data-d="10">+10</button></div>`;
 function bindQty(f,inp,upd){
   $(inp).oninput=e=>{f.q=Math.max(0,parseInt(e.target.value)||0);upd()};
@@ -341,8 +345,8 @@ function vRep(){
     ${fix?'<p class="note" style="margin:0">Retire des palettes enregistrées par erreur. La correction reste visible dans l\'historique.</p>':''}
     <div class="field"><label for="rw">Largeur</label><select id="rw"><option>1 mètre</option></select></div>
     <div class="field"><label for="rl">Longueur</label><select id="rl">${lenOpts(f.len,fix)}</select></div>
-    <div class="field"><label for="rq" style="margin-bottom:0">${fix?'Quantité à retirer':'Quantité réparée'}</label>
-      <div class="qtybox"><input id="rq" class="num" type="number" inputmode="numeric" min="0" value="${f.q}">${stepsHtml}</div></div>
+    <div class="field"><label for="rq" style="margin-bottom:0">${fix?'Palettes à retirer du stock':'Quantité réparée'}</label>
+      <div class="qtybox">${fix?`<div class="neg"><span aria-hidden="true">−</span><input id="rq" class="num" type="number" inputmode="numeric" min="0" value="${f.q}" style="width:3.6ch;text-align:left;padding:4px 0"></div>${stepsFix}`:`<input id="rq" class="num" type="number" inputmode="numeric" min="0" value="${f.q}">${stepsHtml}`}</div></div>
     ${fix?`<div class="field"><label for="rm">Motif de la correction (facultatif)</label><input id="rm" placeholder="ex. Erreur de saisie, mauvaise longueur" value="${esc(f.motif)}"></div>`:''}
     <button class="btn${fix?' blue':''}" id="rgo" disabled>${fix?'Valider la correction':'Valider la réparation'}</button>
     <div class="preview num" id="rprev"></div>
